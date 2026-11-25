@@ -1078,6 +1078,8 @@ public final class GboardFrostedGlassRuntime {
                 applySurfaceOpacity(view, customOpacity, state);
             }
         }
+        dev.jason.gboardpatches.extension.accesspointcount.GboardToolbarButtonBackgroundRuntime
+                .onThemeOpacityApplied(decor);
     }
 
     private static void applySurfaceOpacity(View view, int customOpacity, State state) {
