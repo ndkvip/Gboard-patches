@@ -18,6 +18,10 @@ public final class GboardFrostedGlassLifecycleRuntime {
         } catch (Throwable ignored) { /* Stock window configuration stays in effect. */ }
     }
     public static void onInputViewStarted(Object receiver) {
+        try {
+            dev.jason.gboardpatches.extension.accesspointcount.GboardToolbarButtonBackgroundRuntime
+                    .onInputViewStarted(receiver);
+        } catch (Throwable ignored) { /* Never affect showing the IME. */ }
         if (!supported()) return;
         try {
             GboardFrostedGlassRuntime.onWindowShown(receiver);

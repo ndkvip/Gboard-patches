@@ -25,9 +25,10 @@ public final class GboardAccessPointCountSettingsFeatureTest {
         Assert.assertEquals(GboardPatchesSettingsContract.PanelStyle.FLAT,
                 screen.getPanelStyle());
         List<GboardPatchesSettingsContract.Row> rows = screen.getRows();
-        Assert.assertEquals(2, rows.size());
+        Assert.assertEquals(3, rows.size());
         Assert.assertTrue(rows.get(0) instanceof GboardPatchesSettingsContract.ToggleRow);
         Assert.assertTrue(rows.get(1) instanceof GboardPatchesSettingsContract.SelectorRow);
+        Assert.assertTrue(rows.get(2) instanceof GboardPatchesSettingsContract.ToggleRow);
 
         GboardPatchesSettingsContract.ToggleRow toggle =
                 (GboardPatchesSettingsContract.ToggleRow) rows.get(0);
