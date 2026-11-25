@@ -98,8 +98,8 @@ public final class GboardAccessPointCountSettingsFeature
                     GboardAccessPointCountSettings.read(preferences),
                     value -> GboardAccessPointCountSettings.writeEnabled(preferences, value),
                     value -> GboardAccessPointCountSettings.writeCount(preferences, value),
-                    GboardToolbarButtonBackgroundRuntime.readHidden(preferences),
-                    value -> GboardToolbarButtonBackgroundRuntime.writeHidden(preferences, value));
+                    GboardToolbarButtonBackgroundRuntime.readEnabled(preferences),
+                    value -> GboardToolbarButtonBackgroundRuntime.writeEnabled(preferences, value));
         } catch (Throwable throwable) {
             Log.w(TAG, "Failed to render access point count settings", throwable);
             return buildErrorScreen();
@@ -112,7 +112,7 @@ public final class GboardAccessPointCountSettingsFeature
             GboardPatchesSettingsContract.ToggleAction toggleAction,
             CountWriter countWriter) {
         return buildScreenForState(host, snapshot, toggleAction, countWriter,
-                GboardToolbarButtonBackgroundRuntime.DEFAULT_HIDE_TOOLBAR_BUTTON_BG,
+                GboardToolbarButtonBackgroundRuntime.DEFAULT_TOOLBAR_BUTTON_BG_ENABLED,
                 value -> { });
     }
 
@@ -121,8 +121,8 @@ public final class GboardAccessPointCountSettingsFeature
             GboardAccessPointCountSettings.Snapshot snapshot,
             GboardPatchesSettingsContract.ToggleAction toggleAction,
             CountWriter countWriter,
-            boolean hideToolbarButtonBg,
-            GboardPatchesSettingsContract.ToggleAction hideToolbarBgToggleAction) {
+            boolean toolbarButtonBgEnabled,
+            GboardPatchesSettingsContract.ToggleAction toolbarBgToggleAction) {
         GboardAccessPointCountSettings.Snapshot safeSnapshot = snapshot == null
                 ? new GboardAccessPointCountSettings.Snapshot(
                         GboardAccessPointCountSettings.DEFAULT_ENABLED,
@@ -156,11 +156,11 @@ public final class GboardAccessPointCountSettingsFeature
                                         .setRestartRequired(
                                                 GboardAccessPointCountSettings.PREF_KEY_COUNT),
                                 new GboardPatchesSettingsContract.ToggleRow(
-                                        "Hide top toolbar button background",
-                                        "Remove the pill/circle background behind buttons on the top toolbar.",
+                                        "Top toolbar button background",
+                                        "Show a rounded background matching the keyboard keys behind top toolbar buttons.",
                                         true,
-                                        hideToolbarButtonBg,
-                                        hideToolbarBgToggleAction)))),
+                                        toolbarButtonBgEnabled,
+                                        toolbarBgToggleAction)))),
                 GboardPatchesSettingsContract.RefreshPolicy.none(),
                 GboardPatchesSettingsContract.PanelStyle.FLAT);
     }

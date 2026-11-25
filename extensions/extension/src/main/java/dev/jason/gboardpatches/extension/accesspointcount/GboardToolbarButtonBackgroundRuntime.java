@@ -2,10 +2,17 @@ package dev.jason.gboardpatches.extension.accesspointcount;
 
 import android.app.Dialog;
 import android.content.SharedPreferences;
+import android.content.res.ColorStateList;
 import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
+import android.graphics.drawable.DrawableWrapper;
+import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.InsetDrawable;
+import android.graphics.drawable.LayerDrawable;
+import android.graphics.drawable.StateListDrawable;
 import android.inputmethodservice.InputMethodService;
+import android.os.Build;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewTreeObserver;
@@ -19,27 +26,28 @@ import java.util.WeakHashMap;
 import dev.jason.gboardpatches.extension.flagsettings.GboardFlagRuntimeContext;
 
 /**
- * Runtime hook that toggles (hides/restores) the pill/circle background drawables
- * behind buttons on Gboard's top toolbar (header / access points strip).
+ * Runtime hook that toggles a rounded key-style background on buttons in Gboard's top toolbar,
+ * dynamically matching the background color of the active theme's keyboard keys.
  */
 public final class GboardToolbarButtonBackgroundRuntime {
-    public static final String PREF_KEY_HIDE_TOOLBAR_BUTTON_BG =
-            "pref_toolbar_button_bg_hidden";
-    public static final boolean DEFAULT_HIDE_TOOLBAR_BUTTON_BG = false;
+    public static final String PREF_KEY_TOOLBAR_BUTTON_BG_ENABLED =
+            "pref_toolbar_button_bg_enabled";
+    public static final boolean DEFAULT_TOOLBAR_BUTTON_BG_ENABLED = false;
 
     private static final Map<Window, ViewTreeObserver.OnGlobalLayoutListener> ATTACHED_WINDOWS =
             new WeakHashMap<>();
     private static final Map<View, Drawable> ORIGINAL_BACKGROUNDS = new WeakHashMap<>();
+    private static final Map<View, Integer> APPLIED_COLORS = new WeakHashMap<>();
 
     private GboardToolbarButtonBackgroundRuntime() {
     }
 
-    public static boolean readHidden(SharedPreferences preferences) {
+    public static boolean readEnabled(SharedPreferences preferences) {
         if (preferences == null) {
-            return DEFAULT_HIDE_TOOLBAR_BUTTON_BG;
+            return DEFAULT_TOOLBAR_BUTTON_BG_ENABLED;
         }
         try {
-            Object raw = preferences.getAll().get(PREF_KEY_HIDE_TOOLBAR_BUTTON_BG);
+            Object raw = preferences.getAll().get(PREF_KEY_TOOLBAR_BUTTON_BG_ENABLED);
             if (raw instanceof Boolean value) {
                 return value.booleanValue();
             }
@@ -51,19 +59,19 @@ public final class GboardToolbarButtonBackgroundRuntime {
                     return false;
                 }
             }
-            return DEFAULT_HIDE_TOOLBAR_BUTTON_BG;
+            return DEFAULT_TOOLBAR_BUTTON_BG_ENABLED;
         } catch (Throwable ignored) {
-            return DEFAULT_HIDE_TOOLBAR_BUTTON_BG;
+            return DEFAULT_TOOLBAR_BUTTON_BG_ENABLED;
         }
     }
 
-    public static boolean writeHidden(SharedPreferences preferences, boolean hidden) {
+    public static boolean writeEnabled(SharedPreferences preferences, boolean enabled) {
         if (preferences == null) {
             return false;
         }
         try {
             return preferences.edit()
-                    .putBoolean(PREF_KEY_HIDE_TOOLBAR_BUTTON_BG, hidden)
+                    .putBoolean(PREF_KEY_TOOLBAR_BUTTON_BG_ENABLED, enabled)
                     .commit();
         } catch (Throwable ignored) {
             return false;
@@ -116,14 +124,101 @@ public final class GboardToolbarButtonBackgroundRuntime {
             prefs = GboardFlagRuntimeContext.preferencesOrNull();
         } catch (Throwable ignored) {
         }
-        boolean hide = readHidden(prefs);
-        if (!hide && ORIGINAL_BACKGROUNDS.isEmpty()) {
+        boolean enabled = readEnabled(prefs);
+        if (!enabled && ORIGINAL_BACKGROUNDS.isEmpty()) {
             return;
         }
-        traverse(root, false, hide);
+        Integer keyColor = enabled ? findKeyBackgroundColor(root, false) : null;
+        if (enabled && keyColor == null) {
+            return;
+        }
+        traverseHeader(root, false, enabled, keyColor != null ? keyColor.intValue() : Color.TRANSPARENT);
     }
 
-    private static void traverse(View view, boolean insideHeader, boolean hide) {
+    private static Integer findKeyBackgroundColor(View view, boolean insideBody) {
+        if (view == null || view.getVisibility() != View.VISIBLE) {
+            return null;
+        }
+        boolean nowInBody = insideBody || isKeyboardBodyContainer(view);
+        if (nowInBody && isRegularKeyCandidate(view)) {
+            Integer color = extractSolidColor(view.getBackground());
+            if (color != null && Color.alpha(color) >= 16) {
+                return color;
+            }
+        }
+        if (view instanceof ViewGroup group) {
+            int count = group.getChildCount();
+            for (int i = 0; i < count; i++) {
+                Integer found = findKeyBackgroundColor(group.getChildAt(i), nowInBody);
+                if (found != null) {
+                    return found;
+                }
+            }
+        }
+        return null;
+    }
+
+    private static boolean isRegularKeyCandidate(View view) {
+        if (view.getBackground() == null) {
+            return false;
+        }
+        String tag = tagOf(view);
+        if (tag.contains("action") || tag.contains("space") || tag.contains("body")
+                || tag.contains("base") || tag.contains("header")) {
+            return false;
+        }
+        if (tag.contains("key")) {
+            return true;
+        }
+        int w = view.getWidth();
+        int h = view.getHeight();
+        return w > 0 && h > 0 && w <= h * 2 && view.isClickable();
+    }
+
+    private static Integer extractSolidColor(Drawable drawable) {
+        if (drawable == null) {
+            return null;
+        }
+        if (drawable instanceof ColorDrawable cd) {
+            int c = cd.getColor();
+            return Color.alpha(c) >= 16 ? c : null;
+        }
+        if (drawable instanceof GradientDrawable gd) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                ColorStateList csl = gd.getColor();
+                if (csl != null) {
+                    int c = csl.getDefaultColor();
+                    if (Color.alpha(c) >= 16) {
+                        return c;
+                    }
+                }
+            }
+            return null;
+        }
+        if (drawable instanceof StateListDrawable sld) {
+            Drawable current = sld.getCurrent();
+            if (current != null && current != drawable) {
+                return extractSolidColor(current);
+            }
+        }
+        if (drawable instanceof DrawableWrapper wrapper) {
+            Drawable inner = wrapper.getDrawable();
+            if (inner != null && inner != drawable) {
+                return extractSolidColor(inner);
+            }
+        }
+        if (drawable instanceof LayerDrawable ld) {
+            for (int i = ld.getNumberOfLayers() - 1; i >= 0; i--) {
+                Integer c = extractSolidColor(ld.getDrawable(i));
+                if (c != null) {
+                    return c;
+                }
+            }
+        }
+        return null;
+    }
+
+    private static void traverseHeader(View view, boolean insideHeader, boolean enabled, int keyColor) {
         if (view == null) {
             return;
         }
@@ -133,34 +228,52 @@ public final class GboardToolbarButtonBackgroundRuntime {
         }
 
         if (nowInHeader && isToolbarButtonCandidate(view)) {
-            applyBackgroundState(view, hide);
+            applyBackgroundState(view, enabled, keyColor);
         }
 
         if (view instanceof ViewGroup group) {
             int count = group.getChildCount();
             for (int i = 0; i < count; i++) {
-                traverse(group.getChildAt(i), nowInHeader, hide);
+                traverseHeader(group.getChildAt(i), nowInHeader, enabled, keyColor);
             }
         }
     }
 
-    private static void applyBackgroundState(View view, boolean hide) {
-        if (hide) {
-            Drawable current = view.getBackground();
-            if (current != null && !isTransparentColorDrawable(current)) {
-                synchronized (ORIGINAL_BACKGROUNDS) {
-                    if (!ORIGINAL_BACKGROUNDS.containsKey(view)) {
-                        ORIGINAL_BACKGROUNDS.put(view, current);
-                    }
+    private static void applyBackgroundState(View view, boolean enabled, int keyColor) {
+        if (enabled) {
+            synchronized (APPLIED_COLORS) {
+                Integer prev = APPLIED_COLORS.get(view);
+                if (prev != null && prev.intValue() == keyColor) {
+                    return;
                 }
-                view.setBackgroundColor(Color.TRANSPARENT);
+            }
+            synchronized (ORIGINAL_BACKGROUNDS) {
+                if (!ORIGINAL_BACKGROUNDS.containsKey(view)) {
+                    ORIGINAL_BACKGROUNDS.put(view, view.getBackground());
+                }
+            }
+            float density = view.getResources().getDisplayMetrics().density;
+            int insetPx = Math.max(1, Math.round(3f * density));
+            float radiusPx = Math.max(8f * density, view.getHeight() * 0.45f);
+            GradientDrawable pill = new GradientDrawable();
+            pill.setShape(GradientDrawable.RECTANGLE);
+            pill.setColor(keyColor);
+            pill.setCornerRadius(radiusPx);
+            view.setBackground(new InsetDrawable(pill, insetPx, insetPx, insetPx, insetPx));
+            synchronized (APPLIED_COLORS) {
+                APPLIED_COLORS.put(view, keyColor);
             }
         } else {
             Drawable original;
+            boolean hadOriginal;
             synchronized (ORIGINAL_BACKGROUNDS) {
+                hadOriginal = ORIGINAL_BACKGROUNDS.containsKey(view);
                 original = ORIGINAL_BACKGROUNDS.remove(view);
             }
-            if (original != null) {
+            synchronized (APPLIED_COLORS) {
+                APPLIED_COLORS.remove(view);
+            }
+            if (hadOriginal) {
                 view.setBackground(original);
             }
         }
@@ -190,32 +303,25 @@ public final class GboardToolbarButtonBackgroundRuntime {
     }
 
     private static boolean isToolbarButtonCandidate(View view) {
-        if (view.getBackground() == null) {
-            return false;
-        }
         String tag = tagOf(view);
         if (tag.contains("keyboard-header-area") || tag.contains("keyboard-base-area")) {
             return false;
         }
         if (tag.contains("access-point") || tag.contains("access_point")
                 || tag.contains("key_top") || tag.contains("pill")
-                || tag.contains("button") || tag.contains("icon")) {
+                || tag.contains("button")) {
             return true;
         }
         String idName = resourceEntryNameOf(view);
         if (idName.contains("access_point") || idName.contains("key_pos")
-                || idName.contains("icon") || idName.contains("button")
-                || idName.contains("pill") || idName.contains("back")
-                || idName.contains("close") || idName.contains("menu")) {
+                || idName.contains("button") || idName.contains("pill")
+                || idName.contains("back") || idName.contains("close")
+                || idName.contains("menu")) {
             return true;
         }
         return (view instanceof ImageView || view.isClickable())
                 && view.getWidth() > 0 && view.getHeight() > 0
-                && view.getWidth() <= view.getHeight() * 4;
-    }
-
-    private static boolean isTransparentColorDrawable(Drawable drawable) {
-        return drawable instanceof ColorDrawable cd && cd.getColor() == Color.TRANSPARENT;
+                && view.getWidth() <= view.getHeight() * 3;
     }
 
     private static String tagOf(View view) {
