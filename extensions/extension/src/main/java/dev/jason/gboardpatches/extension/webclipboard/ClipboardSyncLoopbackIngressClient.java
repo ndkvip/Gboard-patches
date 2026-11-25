@@ -15,6 +15,7 @@ public final class ClipboardSyncLoopbackIngressClient {
     private static final String LOOPBACK_HOST = "127.0.0.1";
     private static final String STATUS_PATH = "/status";
     private static final String INGRESS_PATH = "/phone-clipboard";
+    private static final String IMAGE_INGRESS_PATH = "/phone-clipboard-image";
     private static final String LOOPBACK_INGRESS_TOKEN_HEADER = "X-Loopback-Ingress-Token";
     private static final int DEFAULT_TIMEOUT_MS = 750;
     private static final int LOOPBACK_CHALLENGE_BYTES = 16;
@@ -25,6 +26,47 @@ public final class ClipboardSyncLoopbackIngressClient {
 
     public static boolean submitPhoneClipboard(String text, int port, String loopbackIngressToken) {
         return submitPhoneClipboard(text, port, loopbackIngressToken, DEFAULT_TIMEOUT_MS);
+    }
+
+    public static boolean submitPhoneClipboardImage(byte[] imageBytes, String mimeType, int port,
+            String loopbackIngressToken) {
+        if (imageBytes == null || imageBytes.length == 0) {
+            return false;
+        }
+        String safeToken = loopbackIngressToken == null ? "" : loopbackIngressToken;
+        if (!ClipboardSyncLoopbackAuth.isUsableToken(safeToken)) {
+            return false;
+        }
+        int safePort = WebClipboardPreferences.sanitizePort(port);
+        String safeMime = (mimeType != null && mimeType.startsWith("image/")) ? mimeType : "image/png";
+        try {
+            if (!isExpectedPortal(safePort, safeToken, DEFAULT_TIMEOUT_MS)) {
+                return false;
+            }
+            try (Socket socket = new Socket()) {
+                socket.connect(new InetSocketAddress(LOOPBACK_HOST, safePort), 2_000);
+                socket.setSoTimeout(4_000);
+                BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(
+                        socket.getOutputStream(), StandardCharsets.UTF_8));
+                writer.write("POST " + IMAGE_INGRESS_PATH + " HTTP/1.1\r\n");
+                writer.write("Host: " + LOOPBACK_HOST + ":" + safePort + "\r\n");
+                writer.write("Content-Type: " + safeMime + "\r\n");
+                writer.write(LOOPBACK_INGRESS_TOKEN_HEADER + ": " + safeToken + "\r\n");
+                writer.write("Content-Length: " + imageBytes.length + "\r\n");
+                writer.write("Connection: close\r\n");
+                writer.write("\r\n");
+                writer.flush();
+                socket.getOutputStream().write(imageBytes);
+                socket.getOutputStream().flush();
+
+                BufferedReader reader = new BufferedReader(new InputStreamReader(
+                        socket.getInputStream(), StandardCharsets.UTF_8));
+                String statusLine = reader.readLine();
+                return statusLine != null && statusLine.contains(" 200 ");
+            }
+        } catch (Throwable ignored) {
+            return false;
+        }
     }
 
     public static boolean isExpectedPortal(int port, String loopbackIngressToken) {

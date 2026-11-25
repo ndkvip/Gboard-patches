@@ -5,9 +5,12 @@ import android.content.ClipDescription;
 import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.net.Uri;
 import android.os.SystemClock;
 import android.util.Log;
 
+import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -103,6 +106,9 @@ public final class GboardWebClipboardCaptureBootstrap {
         if (clipData == null || isWebClipboardEcho(clipData)) {
             return;
         }
+        if (tryDispatchImageLoopback(context, clipData, runtimeLookup.config)) {
+            return;
+        }
         CharSequence text = currentClipboardText(context, clipData);
         if (text == null) {
             return;
@@ -196,6 +202,74 @@ public final class GboardWebClipboardCaptureBootstrap {
                     label == null ? "" : label);
         } catch (Throwable ignored) {
             return false;
+        }
+    }
+
+    private static boolean tryDispatchImageLoopback(Context context, ClipData clipData,
+            RuntimeConfig config) {
+        try {
+            if (clipData == null || clipData.getItemCount() <= 0) {
+                return false;
+            }
+            Uri uri = clipData.getItemAt(0).getUri();
+            if (uri == null) {
+                return false;
+            }
+            String mime = context.getContentResolver().getType(uri);
+            if (mime == null || !mime.startsWith("image/")) {
+                return false;
+            }
+            byte[] bytes;
+            try (InputStream in = context.getContentResolver().openInputStream(uri)) {
+                if (in == null) {
+                    return false;
+                }
+                ByteArrayOutputStream out = new ByteArrayOutputStream();
+                byte[] buf = new byte[16 * 1024];
+                int total = 0;
+                int n;
+                while ((n = in.read(buf)) > 0) {
+                    total += n;
+                    if (total > 10 * 1024 * 1024) {
+                        return false;
+                    }
+                    out.write(buf, 0, n);
+                }
+                bytes = out.toByteArray();
+            }
+            if (bytes.length == 0) {
+                return false;
+            }
+            String hash = sha256HexBytes(bytes);
+            long now = SystemClock.elapsedRealtime();
+            if (hash.equals(lastDispatchedHash)
+                    && now - lastDispatchedElapsedMs <= DUPLICATE_SUPPRESSION_WINDOW_MS) {
+                return true;
+            }
+            boolean accepted = ClipboardSyncLoopbackIngressClient.submitPhoneClipboardImage(
+                    bytes, mime, config.port, config.loopbackIngressToken);
+            if (accepted) {
+                lastDispatchedHash = hash;
+                lastDispatchedElapsedMs = SystemClock.elapsedRealtime();
+            }
+            return true;
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    private static String sha256HexBytes(byte[] data) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] bytes = digest.digest(data);
+            StringBuilder builder = new StringBuilder(bytes.length * 2);
+            for (byte current : bytes) {
+                builder.append(Character.forDigit((current >> 4) & 0xF, 16));
+                builder.append(Character.forDigit(current & 0xF, 16));
+            }
+            return builder.toString();
+        } catch (NoSuchAlgorithmException exception) {
+            return Integer.toHexString(data.length);
         }
     }
 

@@ -7,16 +7,24 @@ import android.app.PendingIntent;
 import android.app.Service;
 import android.content.ClipData;
 import android.content.ClipboardManager;
+import android.content.ContentResolver;
+import android.content.ContentValues;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.ServiceInfo;
+import android.net.Uri;
 import android.os.Build;
+import android.os.Environment;
 import android.os.IBinder;
 import android.os.SystemClock;
+import android.provider.MediaStore;
 import android.util.Log;
 import android.widget.Toast;
 
+import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
@@ -57,6 +65,7 @@ public final class ClipboardSyncService extends Service {
             WebClipboardPreferences.DEFAULT_LOOPBACK_INGRESS_TOKEN;
     private String lastPublishedText = "";
     private long lastPublishedAtElapsedMs;
+    private volatile long lastWebImageAppliedElapsedMs;
     private final WebClipboardEchoSuppressor webClipboardEchoSuppressor =
             new WebClipboardEchoSuppressor(DUPLICATE_SUPPRESSION_WINDOW_MS);
     private final ExecutorService clipboardPublishExecutor = Executors.newSingleThreadExecutor();
@@ -306,7 +315,17 @@ public final class ClipboardSyncService extends Service {
             String loopbackIngressToken) {
         ClipboardSyncWebPortal portal = new ClipboardSyncWebPortal(
                 port,
-                this::applyWebClipboardToPhone,
+                new ClipboardSyncWebPortal.ClipboardBridge() {
+                    @Override
+                    public void applyDesktopClipboard(String text) {
+                        applyWebClipboardToPhone(text);
+                    }
+
+                    @Override
+                    public void applyDesktopImageClipboard(byte[] imageBytes, String mimeType) {
+                        applyWebImageClipboardToPhone(imageBytes, mimeType);
+                    }
+                },
                 ClipboardSyncWebPortal.WebAssets.from(this),
                 new ClipboardSyncWebPortal.SecurityConfig(
                         pairingRequired,
@@ -373,6 +392,9 @@ public final class ClipboardSyncService extends Service {
             return;
         }
         ClipboardManager.OnPrimaryClipChangedListener listener = () -> {
+            if (tryPublishCurrentImageClipboard(clipboardManager)) {
+                return;
+            }
             CharSequence currentText = currentClipboardText(clipboardManager);
             if (currentText != null) {
                 Log.i(TAG, LOG_PREFIX + " service clipboard listener fired"
@@ -425,6 +447,122 @@ public final class ClipboardSyncService extends Service {
             return;
         }
         updateNotification("Clipboard applied from Web");
+    }
+
+    private void applyWebImageClipboardToPhone(byte[] imageBytes, String mimeType) {
+        if (imageBytes == null || imageBytes.length == 0) {
+            return;
+        }
+        ClipboardManager clipboardManager = serviceClipboardManager;
+        if (clipboardManager == null) {
+            clipboardManager = getSystemService(ClipboardManager.class);
+        }
+        if (clipboardManager == null) {
+            return;
+        }
+        String safeMime = (mimeType != null && mimeType.startsWith("image/")) ? mimeType : "image/png";
+        String ext = safeMime.contains("jpeg") || safeMime.contains("jpg") ? "jpg" : "png";
+        String fileName = "GboardSync_" + System.currentTimeMillis() + "." + ext;
+        try {
+            ContentValues values = new ContentValues();
+            values.put(MediaStore.Images.Media.DISPLAY_NAME, fileName);
+            values.put(MediaStore.Images.Media.MIME_TYPE, safeMime);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                values.put(MediaStore.Images.Media.RELATIVE_PATH,
+                        Environment.DIRECTORY_PICTURES + "/GboardSync");
+                values.put(MediaStore.Images.Media.IS_PENDING, 1);
+            }
+            ContentResolver resolver = getContentResolver();
+            Uri uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values);
+            if (uri == null) {
+                return;
+            }
+            try (OutputStream out = resolver.openOutputStream(uri)) {
+                if (out == null) {
+                    return;
+                }
+                out.write(imageBytes);
+                out.flush();
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                ContentValues done = new ContentValues();
+                done.put(MediaStore.Images.Media.IS_PENDING, 0);
+                resolver.update(uri, done, null, null);
+            }
+            lastWebImageAppliedElapsedMs = SystemClock.elapsedRealtime();
+            clipboardManager.setPrimaryClip(ClipData.newUri(
+                    resolver,
+                    ClipboardSyncIngressContract.WEB_CLIPBOARD_LABEL,
+                    uri));
+            updateNotification("Image clipboard applied from Web");
+        } catch (Throwable throwable) {
+            Log.w(TAG, "Failed to apply web image clipboard to phone", throwable);
+        }
+    }
+
+    private boolean tryPublishCurrentImageClipboard(ClipboardManager clipboardManager) {
+        if (SystemClock.elapsedRealtime() - lastWebImageAppliedElapsedMs <= 1_500L) {
+            return false;
+        }
+        ClipboardSyncWebPortal portal = webPortal;
+        if (portal == null || clipboardManager == null) {
+            return false;
+        }
+        try {
+            if (!clipboardManager.hasPrimaryClip()) {
+                return false;
+            }
+            ClipData clipData = clipboardManager.getPrimaryClip();
+            if (clipData == null || clipData.getItemCount() <= 0) {
+                return false;
+            }
+            if (clipData.getDescription() != null
+                    && ClipboardSyncIngressContract.WEB_CLIPBOARD_LABEL.contentEquals(
+                            clipData.getDescription().getLabel() == null
+                                    ? ""
+                                    : clipData.getDescription().getLabel())) {
+                return true;
+            }
+            Uri uri = clipData.getItemAt(0).getUri();
+            if (uri == null) {
+                return false;
+            }
+            String mime = getContentResolver().getType(uri);
+            if (mime == null || !mime.startsWith("image/")) {
+                return false;
+            }
+            byte[] bytes = readUriBytesLimited(uri, 10 * 1024 * 1024);
+            if (bytes == null || bytes.length == 0) {
+                return false;
+            }
+            String finalMime = mime;
+            clipboardPublishExecutor.execute(() -> portal.publishPhoneImage(bytes, finalMime));
+            return true;
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    private byte[] readUriBytesLimited(Uri uri, int maxBytes) {
+        try (InputStream in = getContentResolver().openInputStream(uri)) {
+            if (in == null) {
+                return null;
+            }
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            byte[] buf = new byte[16 * 1024];
+            int total = 0;
+            int n;
+            while ((n = in.read(buf)) > 0) {
+                total += n;
+                if (total > maxBytes) {
+                    return null;
+                }
+                out.write(buf, 0, n);
+            }
+            return out.toByteArray();
+        } catch (Throwable ignored) {
+            return null;
+        }
     }
 
     private void publishClipboardToPortalIfNotWebEcho(String text) {
