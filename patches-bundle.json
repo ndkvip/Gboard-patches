@@ -1,7 +1,7 @@
 {
     "created_at": "2026-11-26T13:38:00",
     "description": "### ✨ QR Pairing Access Point in Gboard Drawer\n\n* **Quét QR tile:** adds a draggable **Quét QR** access-point button right inside Gboard's 4-squares menu drawer (next to Cut / Incognito) with a built-in Camera2 + ZXing QR scanner to permanently pair with AirBridge macOS in 1 scan.\n* **Integrated AirBridge Companion:** UDP auto-discovery (`:8772`), direct Mac Drop Shelf file receive (`Download/AirBridge`), MediaStore photo/download gallery, and automatic Android screenshot -> Mac clipboard sync.",
-    "download_url": "https://github.com/ndkvip/Gboard-patches/releases/download/v4.6.0/patches-4.6.0.mpp",
+    "download_url": "https://github.com/ndkvip/Gboard-patches/releases/download/v4.6.1/patches-4.6.1.mpp",
     "signature_download_url": "",
-    "version": "4.6.0"
+    "version": "4.6.1"
 }

@@ -83,7 +83,15 @@ final class GboardAirBridgeCompanion {
     private Thread beaconThread;
     private volatile long lastSyncedScreenshotId = -1L;
 
-    private final Runnable checkScreenshotRunnable = () -> ioPool.execute(this::checkLatestScreenshot);
+    private final Runnable checkScreenshotRunnable = () -> {
+        if (!running || ioPool.isShutdown()) {
+            return;
+        }
+        try {
+            ioPool.execute(this::checkLatestScreenshot);
+        } catch (Throwable ignored) {
+        }
+    };
     private final ContentObserver screenshotObserver = new ContentObserver(mainHandler) {
         @Override
         public void onChange(boolean selfChange, Uri uri) {

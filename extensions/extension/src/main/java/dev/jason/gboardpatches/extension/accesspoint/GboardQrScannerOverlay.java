@@ -73,7 +73,7 @@ public final class GboardQrScannerOverlay {
 
     public GboardQrScannerOverlay(Activity activity) {
         this.activity = activity;
-        qrReader.setHints(Map.of(
+        qrReader.setHints(Collections.singletonMap(
                 DecodeHintType.POSSIBLE_FORMATS,
                 Collections.singletonList(BarcodeFormat.QR_CODE)));
     }

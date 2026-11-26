@@ -293,6 +293,9 @@ public final class GboardPatchesSettingsActivity extends Activity
     @Override
     protected void onResume() {
         super.onResume();
+        if (qrScannerOverlay != null) {
+            return;
+        }
         featureLifecycleEnabled = true;
         GboardRestartPendingChanges.addListener(restartPendingListener);
         applyRestartPendingCount(GboardRestartPendingChanges.pendingCount(), false);
@@ -302,6 +305,10 @@ public final class GboardPatchesSettingsActivity extends Activity
 
     @Override
     protected void onPause() {
+        if (qrScannerOverlay != null) {
+            super.onPause();
+            return;
+        }
         featureLifecycleEnabled = false;
         GboardRestartPendingChanges.removeListener(restartPendingListener);
         applyOrchestration(settingsOrchestrator.accept(
@@ -316,6 +323,8 @@ public final class GboardPatchesSettingsActivity extends Activity
         if (qrScannerOverlay != null) {
             qrScannerOverlay.release();
             qrScannerOverlay = null;
+            super.onDestroy();
+            return;
         }
         featureLifecycleEnabled = false;
         GboardRestartPendingChanges.removeListener(restartPendingListener);
