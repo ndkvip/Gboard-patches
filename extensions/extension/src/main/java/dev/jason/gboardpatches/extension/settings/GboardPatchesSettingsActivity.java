@@ -209,6 +209,7 @@ public final class GboardPatchesSettingsActivity extends Activity
     private final GboardPatchesSettingsScrollState scrollState =
             new GboardPatchesSettingsScrollState();
     private boolean featuresInitialized;
+    private dev.jason.gboardpatches.extension.accesspoint.GboardQrScannerOverlay qrScannerOverlay;
     private Object backInvokedCallback;
     private final Handler screenRefreshHandler = new Handler(Looper.getMainLooper());
     private final Runnable screenRefreshRunnable = this::refresh;
@@ -258,6 +259,13 @@ public final class GboardPatchesSettingsActivity extends Activity
     protected void onCreate(Bundle savedInstanceState) {
         setTheme(resolveActivityTheme());
         super.onCreate(savedInstanceState);
+        if (getIntent() != null && getIntent().getBooleanExtra(
+                dev.jason.gboardpatches.extension.accesspoint.GboardQrPairAccessPointContribution.EXTRA_QR_SCANNER,
+                false)) {
+            qrScannerOverlay = new dev.jason.gboardpatches.extension.accesspoint.GboardQrScannerOverlay(this);
+            qrScannerOverlay.attach();
+            return;
+        }
         try {
             scheduleRestartCrashRecoveryGuardRestore();
             palette = Palette.forConfiguration(getResources().getConfiguration());
@@ -305,6 +313,10 @@ public final class GboardPatchesSettingsActivity extends Activity
 
     @Override
     protected void onDestroy() {
+        if (qrScannerOverlay != null) {
+            qrScannerOverlay.release();
+            qrScannerOverlay = null;
+        }
         featureLifecycleEnabled = false;
         GboardRestartPendingChanges.removeListener(restartPendingListener);
         applyOrchestration(settingsOrchestrator.accept(

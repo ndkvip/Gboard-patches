@@ -44,6 +44,12 @@ public final class GboardAccessPointContributionsRuntime {
         } catch (Throwable failure) {
             logFailure("Editing buttons catalog contribution failed", failure);
         }
+        try {
+            result = GboardQrPairAccessPointContribution.INSTANCE
+                    .extendOrderCatalog(context, result);
+        } catch (Throwable failure) {
+            logFailure("QR Pair catalog contribution failed", failure);
+        }
         return result;
     }
 
@@ -77,6 +83,11 @@ public final class GboardAccessPointContributionsRuntime {
             }
         } catch (Throwable failure) {
             logFailure("Editing buttons controller contribution failed", failure);
+        }
+        try {
+            GboardQrPairAccessPointContribution.INSTANCE.register(controller, context);
+        } catch (Throwable failure) {
+            logFailure("QR Pair controller contribution failed", failure);
         }
     }
 
