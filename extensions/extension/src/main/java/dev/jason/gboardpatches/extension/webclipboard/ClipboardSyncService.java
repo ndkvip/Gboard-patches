@@ -69,6 +69,7 @@ public final class ClipboardSyncService extends Service {
     private final WebClipboardEchoSuppressor webClipboardEchoSuppressor =
             new WebClipboardEchoSuppressor(DUPLICATE_SUPPRESSION_WINDOW_MS);
     private final ExecutorService clipboardPublishExecutor = Executors.newSingleThreadExecutor();
+    private GboardAirBridgeCompanion airBridgeCompanion;
 
     public static void startOrUpdate(Context context) {
         if (context == null || !WebClipboardLocalNetworkPermission.isGranted(context)) {
@@ -174,6 +175,13 @@ public final class ClipboardSyncService extends Service {
             WebClipboardTileController.markRuntimeActive(this, false);
             registerClipboardListener();
             refreshWebPortal();
+            airBridgeCompanion = new GboardAirBridgeCompanion(this, (bytes, mime) -> {
+                ClipboardSyncWebPortal portal = webPortal;
+                if (portal != null) {
+                    portal.publishPhoneImage(bytes, mime);
+                }
+            });
+            airBridgeCompanion.start();
         } catch (Throwable throwable) {
             Log.w(TAG, "Web Clipboard service onCreate failed", throwable);
             stopSelf();
@@ -241,6 +249,10 @@ public final class ClipboardSyncService extends Service {
             Log.i(TAG, LOG_PREFIX + " service onDestroy portal=" + describePortal(webPortal));
             if (activeService == this) {
                 activeService = null;
+            }
+            if (airBridgeCompanion != null) {
+                airBridgeCompanion.stop();
+                airBridgeCompanion = null;
             }
             unregisterClipboardListener();
             clipboardPublishExecutor.shutdownNow();
@@ -490,10 +502,17 @@ public final class ClipboardSyncService extends Service {
                 resolver.update(uri, done, null, null);
             }
             lastWebImageAppliedElapsedMs = SystemClock.elapsedRealtime();
-            clipboardManager.setPrimaryClip(ClipData.newUri(
+            final ClipboardManager cm = clipboardManager;
+            final ClipData clipData = ClipData.newUri(
                     resolver,
                     ClipboardSyncIngressContract.WEB_CLIPBOARD_LABEL,
-                    uri));
+                    uri);
+            new android.os.Handler(android.os.Looper.getMainLooper()).post(() -> {
+                try {
+                    cm.setPrimaryClip(clipData);
+                } catch (Throwable ignored) {
+                }
+            });
             updateNotification("Image clipboard applied from Web");
         } catch (Throwable throwable) {
             Log.w(TAG, "Failed to apply web image clipboard to phone", throwable);

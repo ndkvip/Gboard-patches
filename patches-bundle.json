@@ -1,7 +1,7 @@
 {
-    "created_at": "2026-11-25T17:50:00",
-    "description": "### ✨ Improvements\n\n* **Top Toolbar & Suggestions:** match Frosted Glass key opacity in real time, draw uniform circles matching the native Mic button across toolbar & drawer states, add rounded-rectangle (`8dp`) backgrounds for suggestion strip items, remove default vertical suggestion dividers, and preserve View padding on Voice Typing bar.\n* **Web Clipboard:** 2-way image clipboard sync (`GET /clipboard/image`, `POST /clipboard/image`, `imageUpdatedAtMs` in `/state`).",
-    "download_url": "https://github.com/ndkvip/Gboard-patches/releases/download/v4.4.2/patches-4.4.2.mpp",
+    "created_at": "2026-11-26T13:12:00",
+    "description": "### ✨ Integrated AirBridge Companion in Gboard\n\n* **Zero-app Mac companion:** Gboard's Web Clipboard service now runs the full AirBridge companion directly inside Gboard (UDP auto-discovery `:8772`, file receive `POST /api/upload` into `Download/AirBridge` with progress & tap-to-open notification, and MediaStore photo/download gallery).\n* **Auto-Screenshot → Mac Clipboard:** automatically syncs new Android screenshots straight to Mac clipboard.\n* **Reliable Mac → Android image paste:** applies incoming images on the main Looper thread.",
+    "download_url": "https://github.com/ndkvip/Gboard-patches/releases/download/v4.5.0/patches-4.5.0.mpp",
     "signature_download_url": "",
-    "version": "4.4.2"
+    "version": "4.5.0"
 }
