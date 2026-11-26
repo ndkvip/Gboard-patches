@@ -45,6 +45,7 @@ public final class ClipboardSyncWebPortal {
     private final ClipboardBridge bridge;
     private final WebAssets webAssets;
     private final SecurityConfig securityConfig;
+    private volatile GboardAirBridgeCompanion airBridgeCompanion;
     private final String portalInstanceId =
             "portal-" + System.currentTimeMillis()
                     + "-" + NEXT_PORTAL_INSTANCE_SEQUENCE.getAndIncrement();
@@ -532,6 +533,25 @@ public final class ClipboardSyncWebPortal {
         }
     }
 
+    void setAirBridgeCompanion(GboardAirBridgeCompanion companion) {
+        this.airBridgeCompanion = companion;
+    }
+
+    private static boolean isAirBridgeApiRequest(String requestLine) {
+        if (requestLine == null) {
+            return false;
+        }
+        int firstSpace = requestLine.indexOf(' ');
+        if (firstSpace < 0) {
+            return false;
+        }
+        int pathStart = firstSpace + 1;
+        while (pathStart < requestLine.length() && requestLine.charAt(pathStart) == ' ') {
+            pathStart++;
+        }
+        return requestLine.regionMatches(pathStart, "/api/", 0, 5);
+    }
+
     private void handleClient(Socket socket) {
         try {
             socket.setSoTimeout(10_000);
@@ -539,6 +559,11 @@ public final class ClipboardSyncWebPortal {
             String requestLine = readHttpLine(input);
             if (requestLine == null || requestLine.isBlank()) {
                 closeQuietly(socket);
+                return;
+            }
+            GboardAirBridgeCompanion companion = airBridgeCompanion;
+            if (companion != null && isAirBridgeApiRequest(requestLine)) {
+                companion.handleHttpRequest(socket, requestLine, input);
                 return;
             }
             Request request = readRequest(requestLine, input);

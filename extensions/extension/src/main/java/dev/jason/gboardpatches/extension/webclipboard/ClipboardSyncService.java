@@ -174,13 +174,13 @@ public final class ClipboardSyncService extends Service {
             }
             WebClipboardTileController.markRuntimeActive(this, false);
             registerClipboardListener();
-            refreshWebPortal();
             airBridgeCompanion = new GboardAirBridgeCompanion(this, (bytes, mime) -> {
                 ClipboardSyncWebPortal portal = webPortal;
                 if (portal != null) {
                     portal.publishPhoneImage(bytes, mime);
                 }
             });
+            refreshWebPortal();
             airBridgeCompanion.start();
         } catch (Throwable throwable) {
             Log.w(TAG, "Web Clipboard service onCreate failed", throwable);
@@ -343,11 +343,15 @@ public final class ClipboardSyncService extends Service {
                         pairingRequired,
                         pairingCode,
                         loopbackIngressToken));
+        portal.setAirBridgeCompanion(airBridgeCompanion);
         try {
             portal.start();
             webPortal = portal;
             activePortal = portal;
             currentPortalPort = port;
+            if (airBridgeCompanion != null) {
+                airBridgeCompanion.setPortalPort(portal.getPort());
+            }
             currentPairingRequired = pairingRequired;
             currentPairingCode = pairingCode;
             currentLoopbackIngressToken = loopbackIngressToken;

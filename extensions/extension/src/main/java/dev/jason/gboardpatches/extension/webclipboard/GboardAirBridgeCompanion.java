@@ -33,10 +33,8 @@ import java.io.OutputStream;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
-import java.net.InetSocketAddress;
 import java.net.InterfaceAddress;
 import java.net.NetworkInterface;
-import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
@@ -64,7 +62,6 @@ import java.util.concurrent.Executors;
  */
 final class GboardAirBridgeCompanion {
     private static final String TAG = "GboardAirBridge";
-    private static final int AIRBRIDGE_PORT = 8771;
     private static final int DISCOVERY_UDP_PORT = 8772;
     private static final String TRANSFER_CHANNEL_ID = "gboard_airbridge_transfer";
     private static final int TRANSFER_NOTI_ID = 8779;
@@ -80,8 +77,7 @@ final class GboardAirBridgeCompanion {
     private final Map<String, long[]> failedAttemptsByIp = new ConcurrentHashMap<>();
 
     private volatile boolean running = false;
-    private ServerSocket serverSocket;
-    private Thread acceptThread;
+    private volatile int portalPort = WebClipboardPreferences.DEFAULT_PORT;
     private Thread beaconThread;
     private volatile long lastSyncedScreenshotId = -1L;
     private Runnable dismissTransferPillRunnable;
@@ -109,6 +105,12 @@ final class GboardAirBridgeCompanion {
         this.screenshotCallback = screenshotCallback;
     }
 
+    void setPortalPort(int port) {
+        if (port > 0) {
+            this.portalPort = port;
+        }
+    }
+
     void start() {
         if (running) {
             return;
@@ -116,7 +118,6 @@ final class GboardAirBridgeCompanion {
         running = true;
         ensureTransferChannel();
         startScreenshotObserver();
-        startHttpServer();
         startUdpBeacon();
     }
 
@@ -126,17 +127,6 @@ final class GboardAirBridgeCompanion {
         try {
             appContext.getContentResolver().unregisterContentObserver(screenshotObserver);
         } catch (Throwable ignored) {
-        }
-        try {
-            if (serverSocket != null) {
-                serverSocket.close();
-            }
-        } catch (Throwable ignored) {
-        }
-        serverSocket = null;
-        if (acceptThread != null) {
-            acceptThread.interrupt();
-            acceptThread = null;
         }
         if (beaconThread != null) {
             beaconThread.interrupt();
@@ -272,7 +262,9 @@ final class GboardAirBridgeCompanion {
                 String name = Build.MODEL != null ? Build.MODEL : "Android";
 
                 while (running && !Thread.currentThread().isInterrupted()) {
-                    int boundPort = serverSocket != null ? serverSocket.getLocalPort() : AIRBRIDGE_PORT;
+                    int boundPort = portalPort > 0
+                            ? portalPort
+                            : WebClipboardPreferences.getPort(WebClipboardPreferences.preferences(appContext));
                     byte[] payload = new JSONObject()
                             .put("app", "AirBridge")
                             .put("deviceId", deviceId)
@@ -310,37 +302,13 @@ final class GboardAirBridgeCompanion {
         beaconThread.start();
     }
 
-    private void startHttpServer() {
-        acceptThread = new Thread(() -> {
-            try {
-                ServerSocket ss = new ServerSocket();
-                ss.setReuseAddress(true);
-                try {
-                    ss.bind(new InetSocketAddress(InetAddress.getByName("0.0.0.0"), AIRBRIDGE_PORT), 32);
-                } catch (Throwable busy) {
-                    ss.bind(new InetSocketAddress(InetAddress.getByName("0.0.0.0"), 0), 32);
-                }
-                serverSocket = ss;
-                Log.i(TAG, "Gboard AirBridge listening on port " + ss.getLocalPort());
-                while (running && !ss.isClosed()) {
-                    Socket client = ss.accept();
-                    ioPool.execute(() -> handleClient(client));
-                }
-            } catch (Throwable ignored) {
-            }
-        }, "GboardAirBridgeHttp");
-        acceptThread.setDaemon(true);
-        acceptThread.start();
-    }
-
-    private void handleClient(Socket socket) {
+    void handleHttpRequest(Socket socket, String reqLine, InputStream rawInput) {
         try (Socket conn = socket) {
             conn.setTcpNoDelay(true);
             conn.setSoTimeout(120_000);
-            BufferedInputStream in = new BufferedInputStream(conn.getInputStream(), 64 * 1024);
+            BufferedInputStream in = new BufferedInputStream(rawInput, 64 * 1024);
             OutputStream out = conn.getOutputStream();
 
-            String reqLine = readAsciiLine(in);
             if (reqLine == null || reqLine.isEmpty()) {
                 return;
             }
@@ -697,7 +665,9 @@ final class GboardAirBridgeCompanion {
             if (!promotedStyle && !done) {
                 b.setProgress(100, pct, total <= 0);
             }
-            nm.notify(TRANSFER_NOTI_ID, b.build());
+            Notification notification = b.build();
+            logPromotionStatus(nm, done ? "completed" : ("progress(" + pct + "%)"), notification);
+            nm.notify(TRANSFER_NOTI_ID, notification);
 
             if (done) {
                 final PendingIntent finalOpenPi = openPi;
@@ -769,6 +739,15 @@ final class GboardAirBridgeCompanion {
             return true;
         } catch (Throwable ignored) {
             return false;
+        }
+    }
+
+    private static void logPromotionStatus(NotificationManager nm, String stage, Notification notification) {
+        try {
+            Object canPost = NotificationManager.class.getMethod("canPostPromotedNotifications").invoke(nm);
+            Object hasChars = Notification.class.getMethod("hasPromotableCharacteristics").invoke(notification);
+            Log.i(TAG, "FluidCloud " + stage + " canPostPromoted=" + canPost + " hasPromotableChars=" + hasChars);
+        } catch (Throwable ignored) {
         }
     }
 

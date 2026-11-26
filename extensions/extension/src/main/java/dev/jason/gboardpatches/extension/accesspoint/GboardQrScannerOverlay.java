@@ -296,6 +296,7 @@ public final class GboardQrScannerOverlay {
                 SharedPreferences wcPrefs = WebClipboardPreferences.preferences(appCtx);
                 String pairingCode = WebClipboardPreferences.getPairingCode(wcPrefs);
                 if (pairingCode == null) pairingCode = "";
+                int webPort = WebClipboardPreferences.getPort(wcPrefs);
 
                 String phoneIp = findLocalIpv4();
                 String model = (Build.MANUFACTURER != null ? Build.MANUFACTURER : "Android")
@@ -307,7 +308,7 @@ public final class GboardQrScannerOverlay {
                         .put("deviceName", Build.MODEL != null ? Build.MODEL : "Android")
                         .put("model", model)
                         .put("host", phoneIp != null ? phoneIp : "")
-                        .put("webPort", 8771)
+                        .put("webPort", webPort)
                         .put("tlsPort", 0)
                         .put("certSha256", "")
                         .put("token", pairingCode)
