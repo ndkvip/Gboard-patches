@@ -12,8 +12,10 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.database.ContentObserver;
 import android.database.Cursor;
+import android.graphics.Color;
 import android.net.Uri;
 import android.os.Build;
+import android.os.Bundle;
 import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
@@ -82,6 +84,7 @@ final class GboardAirBridgeCompanion {
     private Thread acceptThread;
     private Thread beaconThread;
     private volatile long lastSyncedScreenshotId = -1L;
+    private Runnable dismissTransferPillRunnable;
 
     private final Runnable checkScreenshotRunnable = () -> {
         if (!running || ioPool.isShutdown()) {
@@ -656,29 +659,116 @@ final class GboardAirBridgeCompanion {
         try {
             NotificationManager nm = (NotificationManager) appContext.getSystemService(Context.NOTIFICATION_SERVICE);
             if (nm == null) return;
+            if (dismissTransferPillRunnable != null) {
+                mainHandler.removeCallbacks(dismissTransferPillRunnable);
+                dismissTransferPillRunnable = null;
+            }
+
             int pct = total > 0 ? (int) Math.min(100, (written * 100L) / total) : (done ? 100 : 0);
+            PendingIntent openPi = null;
+            if (done && openUri != null) {
+                Intent view = new Intent(Intent.ACTION_VIEW);
+                view.setDataAndType(openUri, mime);
+                view.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
+                openPi = PendingIntent.getActivity(
+                        appContext, TRANSFER_NOTI_ID, view,
+                        PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+            }
+
             Notification.Builder b = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
                     ? new Notification.Builder(appContext, TRANSFER_CHANNEL_ID)
                     : new Notification.Builder(appContext);
             b.setSmallIcon(done ? android.R.drawable.stat_sys_download_done : android.R.drawable.stat_sys_download)
                     .setContentTitle(done ? "Đã nhận từ Mac" : "Đang nhận từ Mac • " + pct + "%")
                     .setContentText(fileName + " (" + formatSize(done ? written : total) + ")")
-                    .setOngoing(!done)
+                    .setOngoing(true)
                     .setOnlyAlertOnce(!done)
-                    .setAutoCancel(done);
-            if (!done) {
+                    .setShowWhen(true)
+                    .setWhen(System.currentTimeMillis());
+            if (openPi != null) {
+                b.setContentIntent(openPi);
+            }
+
+            boolean promotedStyle = applyLiveUpdatePromotion(
+                    b,
+                    done ? "Đã nhận" : (pct + "%"),
+                    done ? 100 : pct,
+                    done ? Color.parseColor("#34C759") : Color.parseColor("#0A84FF"));
+            if (!promotedStyle && !done) {
                 b.setProgress(100, pct, total <= 0);
-            } else if (openUri != null) {
-                Intent view = new Intent(Intent.ACTION_VIEW);
-                view.setDataAndType(openUri, mime);
-                view.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
-                PendingIntent pi = PendingIntent.getActivity(
-                        appContext, TRANSFER_NOTI_ID, view,
-                        PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
-                b.setContentIntent(pi);
             }
             nm.notify(TRANSFER_NOTI_ID, b.build());
+
+            if (done) {
+                final PendingIntent finalOpenPi = openPi;
+                final String finalSummary = "Lưu tại Download/AirBridge (" + formatSize(written) + ")";
+                dismissTransferPillRunnable = () -> {
+                    try {
+                        Notification.Builder doneB = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+                                ? new Notification.Builder(appContext, TRANSFER_CHANNEL_ID)
+                                : new Notification.Builder(appContext);
+                        doneB.setSmallIcon(android.R.drawable.stat_sys_download_done)
+                                .setContentTitle("Đã nhận: " + fileName)
+                                .setContentText(finalSummary)
+                                .setOngoing(false)
+                                .setOnlyAlertOnce(true)
+                                .setAutoCancel(true);
+                        if (finalOpenPi != null) {
+                            doneB.setContentIntent(finalOpenPi);
+                        }
+                        nm.notify(TRANSFER_NOTI_ID, doneB.build());
+                    } catch (Throwable ignored) {
+                    }
+                };
+                mainHandler.postDelayed(dismissTransferPillRunnable, 5000L);
+            }
         } catch (Throwable ignored) {
+        }
+    }
+
+    private static boolean applyLiveUpdatePromotion(Notification.Builder builder,
+            String shortText, int progress, int accentColor) {
+        if (Build.VERSION.SDK_INT < 35) {
+            return false;
+        }
+        try {
+            Bundle extras = new Bundle();
+            extras.putBoolean("android.requestPromotedOngoing", true);
+            extras.putString("android.shortCriticalText", shortText);
+            builder.addExtras(extras);
+        } catch (Throwable ignored) {
+        }
+        try {
+            Notification.Builder.class
+                    .getMethod("setRequestPromotedOngoing", boolean.class)
+                    .invoke(builder, true);
+        } catch (Throwable ignored) {
+        }
+        try {
+            Notification.Builder.class
+                    .getMethod("setShortCriticalText", String.class)
+                    .invoke(builder, shortText);
+        } catch (Throwable ignored) {
+        }
+        try {
+            Class<?> styleClass = Class.forName("android.app.Notification$ProgressStyle");
+            Class<?> segmentClass = Class.forName("android.app.Notification$ProgressStyle$Segment");
+            Object style = styleClass.getDeclaredConstructor().newInstance();
+            Object segment = segmentClass.getDeclaredConstructor(int.class).newInstance(100);
+            try {
+                segmentClass.getMethod("setColor", int.class).invoke(segment, accentColor);
+            } catch (Throwable ignored) {
+            }
+            styleClass.getMethod("addProgressSegment", segmentClass).invoke(style, segment);
+            styleClass.getMethod("setProgress", int.class).invoke(style, progress);
+            try {
+                styleClass.getMethod("setStyledByProgress", boolean.class).invoke(style, true);
+            } catch (Throwable ignored) {
+            }
+            builder.setStyle((Notification.Style) style);
+            return true;
+        } catch (Throwable ignored) {
+            return false;
         }
     }
 

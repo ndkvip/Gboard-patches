@@ -38,12 +38,14 @@ import com.google.zxing.common.HybridBinarizer;
 
 import org.json.JSONObject;
 
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
 import java.io.OutputStream;
-import java.net.HttpURLConnection;
 import java.net.Inet4Address;
 import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.net.NetworkInterface;
-import java.net.URL;
+import java.net.Socket;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.Collections;
@@ -312,26 +314,36 @@ public final class GboardQrScannerOverlay {
                         .put("pin", pairingCode)
                         .toString();
 
-                HttpURLConnection conn = (HttpURLConnection) new URL(
-                        "http://" + finalMacIp + ":" + finalMacPort + "/qr-pair").openConnection();
-                conn.setRequestMethod("POST");
-                conn.setConnectTimeout(5000);
-                conn.setReadTimeout(5000);
-                conn.setDoOutput(true);
-                conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
-                try (OutputStream os = conn.getOutputStream()) {
-                    os.write(payload.getBytes(StandardCharsets.UTF_8));
+                byte[] bodyBytes = payload.getBytes(StandardCharsets.UTF_8);
+                int code = 0;
+                try (Socket sock = new Socket()) {
+                    sock.connect(new InetSocketAddress(finalMacIp, finalMacPort), 5000);
+                    sock.setSoTimeout(5000);
+                    String req = "POST /qr-pair HTTP/1.1\r\n"
+                            + "Host: " + finalMacIp + ":" + finalMacPort + "\r\n"
+                            + "Content-Type: application/json; charset=utf-8\r\n"
+                            + "Content-Length: " + bodyBytes.length + "\r\n"
+                            + "Connection: close\r\n\r\n";
+                    OutputStream os = sock.getOutputStream();
+                    os.write(req.getBytes(StandardCharsets.US_ASCII));
+                    os.write(bodyBytes);
+                    os.flush();
+                    BufferedReader br = new BufferedReader(
+                            new InputStreamReader(sock.getInputStream(), StandardCharsets.US_ASCII));
+                    String statusLine = br.readLine();
+                    if (statusLine != null && statusLine.contains(" 200")) {
+                        code = 200;
+                    }
                 }
-                int code = conn.getResponseCode();
-                conn.disconnect();
 
+                final int finalCode = code;
                 activity.runOnUiThread(() -> {
-                    if (code >= 200 && code < 300) {
+                    if (finalCode >= 200 && finalCode < 300) {
                         Toast.makeText(activity, "✅ Đã ghép nối vĩnh viễn với " + finalClientName + "!", Toast.LENGTH_LONG).show();
                         activity.finish();
                     } else {
                         handledScan.set(false);
-                        statusLabel.setText("Ghép nối thất bại (HTTP " + code + ") — thử lại");
+                        statusLabel.setText("Ghép nối thất bại (HTTP " + finalCode + ") — thử lại");
                     }
                 });
             } catch (Throwable t) {

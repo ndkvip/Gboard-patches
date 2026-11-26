@@ -128,7 +128,8 @@ private val WEB_CLIPBOARD_PERMISSIONS = listOf(
     "android.permission.ACCESS_NETWORK_STATE",
     "android.permission.CHANGE_NETWORK_STATE",
     "android.permission.FOREGROUND_SERVICE",
-    "android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE"
+    "android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE",
+    "android.permission.POST_PROMOTED_NOTIFICATIONS"
 )
 
 private const val PATCHES_SETTINGS_ACTIVITY_CLASS =
