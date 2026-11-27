@@ -110,6 +110,39 @@ internal fun applyGboardWebClipboardManifest(document: Document) {
         WEB_CLIPBOARD_PACKAGE_REPLACED_RECEIVER_CLASS,
     ).apply { setManifestAndroidAttribute("exported", "false") }
     ensureManifestIntentFilter(document, packageReplacedReceiver, ACTION_MY_PACKAGE_REPLACED)
+
+    val shareToMacActivity = ensureManifestComponent(
+        document,
+        application,
+        "activity",
+        SHARE_TO_MAC_ACTIVITY_CLASS,
+    ).apply {
+        setManifestAndroidAttribute("exported", "true")
+        setManifestAndroidAttribute("label", "Gửi sang Mac")
+        setManifestAndroidAttribute("theme", "@android:style/Theme.Translucent.NoTitleBar")
+        setManifestAndroidAttribute("excludeFromRecents", "true")
+    }
+    ensureShareIntentFilter(document, shareToMacActivity, ACTION_SEND)
+    ensureShareIntentFilter(document, shareToMacActivity, ACTION_SEND_MULTIPLE)
+}
+
+private fun ensureShareIntentFilter(
+    document: Document,
+    component: org.w3c.dom.Element,
+    actionName: String,
+) {
+    ensureManifestIntentFilter(document, component, actionName, CATEGORY_DEFAULT)
+    val filter = component.childElements("intent-filter").firstOrNull { f ->
+        f.childElements("action").any { it.getAttributeNS("http://schemas.android.com/apk/res/android", "name") == actionName || it.getAttribute("android:name") == actionName }
+    } ?: return
+    val hasMime = filter.childElements("data").any {
+        it.getAttributeNS("http://schemas.android.com/apk/res/android", "mimeType") == "*/*" || it.getAttribute("android:mimeType") == "*/*"
+    }
+    if (!hasMime) {
+        val data = document.createElement("data")
+        data.setManifestAndroidAttribute("mimeType", "*/*")
+        filter.appendChild(data)
+    }
 }
 
 context(context: ResourcePatchContext)
@@ -142,6 +175,10 @@ private const val WEB_CLIPBOARD_TILE_SERVICE_CLASS =
     "dev.jason.gboardpatches.extension.webclipboard.WebClipboardTileService"
 private const val WEB_CLIPBOARD_PACKAGE_REPLACED_RECEIVER_CLASS =
     "dev.jason.gboardpatches.extension.webclipboard.WebClipboardPackageReplacedReceiver"
+private const val SHARE_TO_MAC_ACTIVITY_CLASS =
+    "dev.jason.gboardpatches.extension.webclipboard.GboardShareToMacActivity"
+private const val ACTION_SEND = "android.intent.action.SEND"
+private const val ACTION_SEND_MULTIPLE = "android.intent.action.SEND_MULTIPLE"
 private const val ACTION_QS_TILE = "android.service.quicksettings.action.QS_TILE"
 private const val ACTION_QS_TILE_PREFERENCES =
     "android.service.quicksettings.action.QS_TILE_PREFERENCES"

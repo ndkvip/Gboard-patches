@@ -334,6 +334,10 @@ public final class GboardQrScannerOverlay {
                     String statusLine = br.readLine();
                     if (statusLine != null && statusLine.contains(" 200")) {
                         code = 200;
+                        abPrefs.edit()
+                                .putString("last_mac_ip", finalMacIp)
+                                .putInt("last_mac_port", 8773)
+                                .apply();
                     }
                 }
 

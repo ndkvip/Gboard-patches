@@ -65,6 +65,10 @@ final class GboardAirBridgeCompanion {
     private static final int DISCOVERY_UDP_PORT = 8772;
     private static final String TRANSFER_CHANNEL_ID = "gboard_airbridge_transfer";
     private static final int TRANSFER_NOTI_ID = 8779;
+    static final String PREFS_NAME = "gboard_airbridge_prefs";
+    static final String KEY_LAST_MAC_IP = "last_mac_ip";
+    static final String KEY_LAST_MAC_PORT = "last_mac_port";
+    static final int DEFAULT_MAC_RECEIVER_PORT = 8773;
 
     interface ScreenshotCallback {
         void onScreenshotCaptured(byte[] imageBytes, String mimeType);
@@ -133,6 +137,26 @@ final class GboardAirBridgeCompanion {
             beaconThread = null;
         }
         ioPool.shutdownNow();
+    }
+
+    static void rememberMacEndpoint(Context ctx, String ip, int port) {
+        if (ctx == null || ip == null || ip.isEmpty() || "unknown".equals(ip)
+                || "127.0.0.1".equals(ip) || "::1".equals(ip) || port <= 0) {
+            return;
+        }
+        try {
+            SharedPreferences prefs = ctx.getApplicationContext()
+                    .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+            String prevIp = prefs.getString(KEY_LAST_MAC_IP, "");
+            int prevPort = prefs.getInt(KEY_LAST_MAC_PORT, 0);
+            if (!ip.equals(prevIp) || port != prevPort) {
+                prefs.edit()
+                        .putString(KEY_LAST_MAC_IP, ip)
+                        .putInt(KEY_LAST_MAC_PORT, port)
+                        .apply();
+            }
+        } catch (Throwable ignored) {
+        }
     }
 
     private String getStableDeviceId() {
@@ -342,6 +366,14 @@ final class GboardAirBridgeCompanion {
 
             // Optional rate-limit & pairing code check using Gboard Web Clipboard's pairing settings
             String remoteIp = conn.getInetAddress() != null ? conn.getInetAddress().getHostAddress() : "unknown";
+            String macPortHeader = headers.get("x-airbridge-mac-port");
+            if (macPortHeader != null && !macPortHeader.isEmpty()) {
+                try {
+                    int macPort = Integer.parseInt(macPortHeader.trim());
+                    rememberMacEndpoint(appContext, remoteIp, macPort);
+                } catch (Throwable ignored) {
+                }
+            }
             if (isLockedOut(remoteIp)) {
                 writeJson(out, 429, new JSONObject().put("error", "TOO_MANY_ATTEMPTS"));
                 return;
